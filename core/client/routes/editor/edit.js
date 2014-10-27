@@ -1,4 +1,6 @@
 import base from 'ghost/mixins/editor-route-base';
+import isNumber from 'ghost/utils/isNumber';
+import isFinite from 'ghost/utils/isFinite';
 
 var EditorEditRoute = Ember.Route.extend(SimpleAuth.AuthenticatedRouteMixin, base, {
     classNames: ['editor'],
@@ -11,7 +13,7 @@ var EditorEditRoute = Ember.Route.extend(SimpleAuth.AuthenticatedRouteMixin, bas
 
         postId = Number(params.post_id);
 
-        if (!_.isNumber(postId) || !_.isFinite(postId) || postId % 1 !== 0 || postId <= 0) {
+        if (!isNumber(postId) || !isFinite(postId) || postId % 1 !== 0 || postId <= 0) {
             return this.transitionTo('error404', 'editor/' + params.post_id);
         }
 
@@ -55,7 +57,11 @@ var EditorEditRoute = Ember.Route.extend(SimpleAuth.AuthenticatedRouteMixin, bas
 
     setupController: function (controller, model) {
         this._super(controller, model);
+
         controller.set('scratch', model.get('markdown'));
+
+        controller.set('titleScratch', model.get('title'));
+
         // used to check if anything has changed in the editor
         controller.set('previousTagNames', model.get('tags').mapBy('name'));
 
@@ -72,6 +78,8 @@ var EditorEditRoute = Ember.Route.extend(SimpleAuth.AuthenticatedRouteMixin, bas
                 isSaving = model.get('isSaving'),
                 isDeleted = model.get('isDeleted'),
                 modelIsDirty = model.get('isDirty');
+
+            this.send('closeSettingsMenu');
 
             // when `isDeleted && isSaving`, model is in-flight, being saved
             // to the server. when `isDeleted && !isSaving && !modelIsDirty`,

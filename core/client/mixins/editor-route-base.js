@@ -8,18 +8,32 @@ var EditorRouteBase = Ember.Mixin.create(styleBody, ShortcutsRoute, loadingIndic
         save: function () {
             this.get('controller').send('save');
         },
+
         publish: function () {
             var controller = this.get('controller');
+
             controller.send('setSaveType', 'publish');
             controller.send('save');
         },
+
         toggleZenMode: function () {
             Ember.$('body').toggleClass('zen');
         },
-        //The actual functionality is implemented in utils/codemirror-shortcuts
+
+        // The actual functionality is implemented in utils/codemirror-shortcuts
         codeMirrorShortcut: function (options) {
             this.get('controller.codemirror').shortcut(options.type);
         }
+    },
+
+    renderTemplate: function (controller, model) {
+        this._super();
+
+        this.render('post-settings-menu', {
+            into: 'application',
+            outlet: 'settings-menu',
+            model: model
+        });
     },
 
     shortcuts: editorShortcuts,
