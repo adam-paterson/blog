@@ -7,7 +7,7 @@
             <button class="close icon-x settings-menu-header-action" {{action "closeSettingsMenu"}}><span class="hidden">Close</span></button>
         </div>
         <div class="settings-menu-content">
-            {{gh-uploader uploaded="setCoverImage" canceled="clearCoverImage" image=image tagName="section"}}
+            {{gh-uploader uploaded="setCoverImage" canceled="clearCoverImage" image=image uploaderReference=uploaderReference tagName="section"}}
             <form>
             <div class="form-group">
                 <label for="url">Post URL</label>
@@ -28,7 +28,7 @@
                 <label for="author-list">Author</label>
                 <span class="input-icon icon-user">
                     <span class="gh-select" tabindex="0">
-                    {{view Ember.Select
+                    {{view "select"
                         name="post-setting-author"
                         id="author-list"
                         content=authors
@@ -42,10 +42,10 @@
 
             <ul class="nav-list nav-list-block">
                 {{#gh-tab tagName="li" classNames="nav-list-item"}}
-                    <a href="#">
+                    <button type="button">
                         <b>Meta Data</b>
                         <span>Extra content for SEO and social media.</span>
-                    </a>
+                    </button>
                 {{/gh-tab}}
             </ul>
 

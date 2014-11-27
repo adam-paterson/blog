@@ -1,3 +1,4 @@
+import AuthenticatedRoute from 'ghost/routes/authenticated';
 import styleBody from 'ghost/mixins/style-body';
 import ShortcutsRoute from 'ghost/mixins/shortcuts-route';
 import loadingIndicator from 'ghost/mixins/loading-indicator';
@@ -12,7 +13,7 @@ paginationSettings = {
     page: 1
 };
 
-PostsRoute = Ember.Route.extend(SimpleAuth.AuthenticatedRouteMixin, ShortcutsRoute, styleBody, loadingIndicator, PaginationRouteMixin, {
+PostsRoute = AuthenticatedRoute.extend(ShortcutsRoute, styleBody, loadingIndicator, PaginationRouteMixin, {
     classNames: ['manage'],
 
     model: function () {
@@ -60,23 +61,46 @@ PostsRoute = Ember.Route.extend(SimpleAuth.AuthenticatedRouteMixin, ShortcutsRou
         this.transitionTo('posts.post', posts.objectAt(newPosition));
     },
 
+    scrollContent: function (amount) {
+        var content = Ember.$('.js-content-preview'),
+            scrolled = content.scrollTop();
+
+        content.scrollTop(scrolled + 50 * amount);
+    },
+
     shortcuts: {
         'up, k': 'moveUp',
         'down, j': 'moveDown',
+        left: 'focusList',
+        right: 'focusContent',
         c: 'newPost'
     },
 
     actions: {
+        focusList: function () {
+            this.controller.set('keyboardFocus', 'postList');
+        },
+        focusContent: function () {
+            this.controller.set('keyboardFocus', 'postContent');
+        },
         newPost: function () {
             this.transitionTo('editor.new');
         },
 
         moveUp: function () {
-            this.stepThroughPosts(-1);
+            if (this.controller.get('postContentFocused')) {
+                this.scrollContent(-1);
+            } else {
+                this.stepThroughPosts(-1);
+            }
         },
 
         moveDown: function () {
-            this.stepThroughPosts(1);
+            if (this.controller.get('postContentFocused')) {
+                this.scrollContent(1);
+            } else {
+                this.stepThroughPosts(1);
+            }
         }
     }
 });
