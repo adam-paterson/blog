@@ -1,0 +1,20 @@
+<a class="sr-only sr-only-focusable" href="#gh-main">Skip to main content</a>
+
+{{gh-alerts notify="topNotificationChange"}}
+
+<div class="gh-viewport {{if autoNav 'gh-autonav'}}">
+
+    {{#unless signedOut}}
+        {{gh-nav-menu open=showNavMenu autoNav=autoNav toggleMaximise="navMenuToggleMaximise" openModal="openModal"}}
+    {{/unless}}
+
+    {{#gh-main onMouseEnter="closeNavMenu" data-notification-count=topNotificationCount}}
+        {{outlet}}
+    {{/gh-main}}
+
+    {{gh-notifications}}
+
+    {{outlet "modal"}}
+    {{outlet "settings-menu"}}
+
+</div>{{!gh-viewport}}

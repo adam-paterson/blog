@@ -1,10 +1,12 @@
 // # Update Checking Service
 //
 // Makes a request to Ghost.org to check if there is a new version of Ghost available.
-// The service is provided in return for users opting in to anonymous usage data collection
-// Blog owners can opt-out of update checks by setting 'updateCheck: false' in their config.js
+// The service is provided in return for users opting in to anonymous usage data collection.
+//
+// Blog owners can opt-out of update checks by setting `privacy: { useUpdateCheck: false }` in their config.js
 //
 // The data collected is as follows:
+//
 // - blog id - a hash of the blog hostname, pathname and dbHash. No identifiable info is stored.
 // - ghost version
 // - node version
@@ -30,12 +32,11 @@ var crypto   = require('crypto'),
     api      = require('./api'),
     config   = require('./config'),
     errors   = require('./errors'),
-    packageInfo = require('../../package.json'),
 
     internal = {context: {internal: true}},
     allowedCheckEnvironments = ['development', 'production'],
     checkEndpoint = 'updates.ghost.org',
-    currentVersion = packageInfo.version;
+    currentVersion = config.ghostVersion;
 
 function updateCheckError(error) {
     api.settings.edit(
