@@ -48,8 +48,6 @@ var EditorBaseRoute = Ember.Mixin.create(styleBody, ShortcutsRoute, {
             deletedWithoutChanges = state.isDeleted &&
                 (state.isSaving || !state.isDirty);
 
-            this.send('closeSettingsMenu');
-
             if (!fromNewToEdit && !deletedWithoutChanges && controllerIsDirty) {
                 transition.abort();
                 this.send('openModal', 'leave-editor', [controller, transition]);

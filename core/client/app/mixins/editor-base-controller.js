@@ -33,7 +33,7 @@ export default Ember.Mixin.create({
         };
     },
 
-    autoSave: function () {
+    autoSave: Ember.observer('model.scratch', function () {
         // Don't save just because we swapped out models
         if (this.get('model.isDraft') && !this.get('model.isNew')) {
             var autoSaveId,
@@ -51,7 +51,7 @@ export default Ember.Mixin.create({
             autoSaveId = Ember.run.debounce(this, 'send', 'save', saveOptions, 3000);
             this.set('autoSaveId', autoSaveId);
         }
-    }.observes('model.scratch'),
+    }),
 
     /**
      * By default, a post will not change its publish state.
@@ -59,9 +59,6 @@ export default Ember.Mixin.create({
      * can the post's status change.
      */
     willPublish: boundOneWay('model.isPublished'),
-
-    // Make sure editor starts with markdown shown
-    isPreview: false,
 
     // set by the editor route and `isDirty`. useful when checking
     // whether the number of tags has changed for `isDirty`.
@@ -236,7 +233,6 @@ export default Ember.Mixin.create({
     },
 
     shouldFocusTitle: Ember.computed.alias('model.isNew'),
-    shouldFocusEditor: Ember.computed.not('model.isNew'),
 
     actions: {
         save: function (options) {
@@ -360,10 +356,6 @@ export default Ember.Mixin.create({
                 }
                 editor.replaceSelection(resultSrc, replacement.start, replacement.end, cursorPosition);
             }
-        },
-
-        togglePreview: function (preview) {
-            this.set('isPreview', preview);
         },
 
         autoSaveNew: function () {

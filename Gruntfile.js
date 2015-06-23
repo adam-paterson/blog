@@ -77,11 +77,10 @@ var _              = require('lodash'),
                     }
                 },
                 express: {
-                    files:  ['core/server.js', 'core/server/**/*.js'],
+                    files:  ['core/ghost-server.js', 'core/server/**/*.js'],
                     tasks:  ['express:dev'],
                     options: {
-                        // **Note:** Without this option specified express won't be reloaded
-                        nospawn: true
+                        spawn: false
                     }
                 },
                 csscomb: {
@@ -507,7 +506,7 @@ var _              = require('lodash'),
             }, function (error, result, code) {
                 /*jshint unused:false*/
                 if (error) {
-                    grunt.fail.fatal(result.stdout);
+                    grunt.fail.fatal(result.stderr);
                 }
                 grunt.log.writeln(result.stdout);
                 done();
@@ -637,7 +636,7 @@ var _              = require('lodash'),
         // details of each of the test suites.
         //
         grunt.registerTask('test-all', 'Run tests and lint code',
-            ['test-routes', 'test-module', 'test-unit', 'test-integration', 'shell:ember:test', 'test-functional']);
+            ['test-routes', 'test-module', 'test-unit', 'test-integration', 'test-ember', 'test-functional']);
 
         // ### Lint
         //
@@ -735,7 +734,7 @@ var _              = require('lodash'),
         );
 
         // ### Ember unit tests *(sub task)*
-        // `grunt testem` will run just the ember unit tests
+        // `grunt test-ember` will run just the ember unit tests
         grunt.registerTask('test-ember', 'Run the ember unit tests',
             ['test-setup', 'shell:ember:test']
         );
@@ -759,7 +758,7 @@ var _              = require('lodash'),
         // The purpose of the functional tests is to ensure that Ghost is working as is expected from a user perspective
         // including buttons and other important interactions in the admin UI.
         grunt.registerTask('test-functional', 'Run functional interface tests (CasperJS)',
-            ['test-setup', 'cleanDatabase', 'express:test', 'spawnCasperJS', 'express:test:stop', 'test-functional-setup']
+            ['test-setup', 'shell:ember:dev', 'cleanDatabase', 'express:test', 'spawnCasperJS', 'express:test:stop', 'test-functional-setup']
         );
 
         // ### Functional tests for the setup process

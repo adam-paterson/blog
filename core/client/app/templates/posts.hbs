@@ -1,9 +1,17 @@
-<div class="page-content">
+<section class="gh-view content-view-container">
+<header class="view-header">
+    {{#gh-view-title openMobileMenu="openMobileMenu"}}Content{{/gh-view-title}}
+    <section class="view-actions">
+        {{#link-to "editor.new" class="btn btn-green" title="New Post"}}New Post{{/link-to}}
+    </section>
+</header>
+
+<div class="view-container">
     <section class="content-list js-content-list {{if postListFocused 'keyboard-focused'}}">
         {{#view "paginated-scroll-box" tagName="section" classNames="content-list-content js-content-scrollbox"}}
         <ol class="posts-list">
             {{#each controller itemController="posts/post" itemView="post-item-view" itemTagName="li" as |post|}}
-                {{#link-to "posts.post" post.model class="permalink" alternateActive=view.active title="Edit this post"}}
+                {{#link-to "posts.post" post.model.id class="permalink" alternateActive=view.active title="Edit this post"}}
                     <h3 class="entry-title">{{post.model.title}}</h3>
                     <section class="entry-meta">
                         <span class="avatar" style={{post.authorAvatarBackground}}>
@@ -33,3 +41,4 @@
         {{outlet}}
     </section>
 </div>
+</section>
