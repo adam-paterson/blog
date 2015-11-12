@@ -3,8 +3,14 @@ import base from 'ghost/mixins/editor-base-route';
 import isNumber from 'ghost/utils/isNumber';
 import isFinite from 'ghost/utils/isFinite';
 
-var EditorEditRoute = AuthenticatedRoute.extend(base, {
+export default AuthenticatedRoute.extend(base, {
     titleToken: 'Editor',
+
+    beforeModel: function (transition) {
+        this.set('_transitionedFromNew', transition.data.fromNew);
+
+        this._super(...arguments);
+    },
 
     model: function (params) {
         var self = this,
@@ -23,7 +29,7 @@ var EditorEditRoute = AuthenticatedRoute.extend(base, {
             staticPages: 'all'
         };
 
-        return self.store.find('post', query).then(function (records) {
+        return self.store.query('post', query).then(function (records) {
             var post = records.get('firstObject');
 
             if (post) {
@@ -44,11 +50,15 @@ var EditorEditRoute = AuthenticatedRoute.extend(base, {
         });
     },
 
+    setupController: function (controller/*, model */) {
+        this._super(...arguments);
+
+        controller.set('shouldFocusEditor', this.get('_transitionedFromNew'));
+    },
+
     actions: {
         authorizationFailed: function () {
             this.send('openModal', 'signin');
         }
     }
 });
-
-export default EditorEditRoute;

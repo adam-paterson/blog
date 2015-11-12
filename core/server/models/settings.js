@@ -59,12 +59,15 @@ Settings = ghostBookshelf.Model.extend({
 
         this.on('created', function (model) {
             model.emitChange('added');
+            model.emitChange(model.attributes.key + '.' + 'added');
         });
         this.on('updated', function (model) {
             model.emitChange('edited');
+            model.emitChange(model.attributes.key + '.' + 'edited');
         });
         this.on('destroyed', function (model) {
             model.emitChange('deleted');
+            model.emitChange(model.attributes.key + '.' + 'deleted');
         });
     },
 
@@ -122,8 +125,17 @@ Settings = ghostBookshelf.Model.extend({
             item = self.filterData(item);
 
             return Settings.forge({key: item.key}).fetch(options).then(function then(setting) {
+                var saveData = {};
+
                 if (setting) {
-                    return setting.save({value: item.value}, options);
+                    if (item.hasOwnProperty('value')) {
+                        saveData.value = item.value;
+                    }
+                    // Internal context can overwrite type (for fixture migrations)
+                    if (options.context.internal && item.hasOwnProperty('type')) {
+                        saveData.type = item.type;
+                    }
+                    return setting.save(saveData, options);
                 }
 
                 return Promise.reject(new errors.NotFoundError('Unable to find setting to update: ' + item.key));

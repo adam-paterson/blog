@@ -115,11 +115,13 @@ User = ghostBookshelf.Model.extend({
         } else if (this.get('id')) {
             return this.get('id');
         } else {
-            errors.logAndThrowError(new Error('missing context'));
+            errors.logAndThrowError(new errors.NotFoundError('missing context'));
         }
     },
 
     toJSON: function toJSON(options) {
+        options = options || {};
+
         var attrs = ghostBookshelf.Model.prototype.toJSON.call(this, options);
         // remove password hash for security reasons
         delete attrs.password;
@@ -162,17 +164,6 @@ User = ghostBookshelf.Model.extend({
     }
 
 }, {
-    setupFilters: function setupFilters(options) {
-        var filterObjects = {};
-        // Deliberately switch from singular 'tag' to 'tags' and 'role' to 'roles' here
-        // TODO: make this consistent
-        if (options.role !== undefined) {
-            filterObjects.roles = ghostBookshelf.model('Role').forge({name: options.role});
-        }
-
-        return filterObjects;
-    },
-
     findPageDefaultOptions: function findPageDefaultOptions() {
         return {
             status: 'active',
@@ -226,10 +217,9 @@ User = ghostBookshelf.Model.extend({
             // these are the only options that can be passed to Bookshelf / Knex.
             validOptions = {
                 findOne: ['withRelated', 'status'],
-                findAll: ['withRelated'],
                 setup: ['id'],
                 edit: ['withRelated', 'id'],
-                findPage: ['page', 'limit', 'status']
+                findPage: ['page', 'limit', 'columns', 'order', 'status']
             };
 
         if (validOptions[methodName]) {
@@ -237,18 +227,6 @@ User = ghostBookshelf.Model.extend({
         }
 
         return options;
-    },
-
-    /**
-     * ### Find All
-     *
-     * @param {Object} options
-     * @returns {*}
-     */
-    findAll:  function findAll(options) {
-        options = options || {};
-        options.withRelated = _.union(options.withRelated, options.include);
-        return ghostBookshelf.Model.findAll.call(this, options);
     },
 
     /**
@@ -263,9 +241,9 @@ User = ghostBookshelf.Model.extend({
 
         delete data.role;
 
-        data = _.extend({
+        data = _.defaults(data || {}, {
             status: 'active'
-        }, data || {});
+        });
 
         status = data.status;
         delete data.status;
@@ -386,9 +364,9 @@ User = ghostBookshelf.Model.extend({
         roles = data.roles || getAuthorRole();
         delete data.roles;
 
-        return generatePasswordHash(userData.password).then(function then(results) {
+        return generatePasswordHash(userData.password).then(function then(hash) {
             // Assign the hashed password
-            userData.password = results[1];
+            userData.password = hash;
             // LookupGravatar
             return self.gravatarLookup(userData);
         }).then(function then(userData) {
@@ -466,14 +444,18 @@ User = ghostBookshelf.Model.extend({
         }
 
         if (action === 'edit') {
+            // Owner can only be editted by owner
+            if (loadedPermissions.user && userModel.hasRole('Owner')) {
+                hasUserPermission = _.any(loadedPermissions.user.roles, {name: 'Owner'});
+            }
             // Users with the role 'Editor' and 'Author' have complex permissions when the action === 'edit'
             // We now have all the info we need to construct the permissions
-            if (_.any(loadedPermissions.user.roles, {name: 'Author'})) {
+            if (loadedPermissions.user && _.any(loadedPermissions.user.roles, {name: 'Author'})) {
                 // If this is the same user that requests the operation allow it.
                 hasUserPermission = hasUserPermission || context.user === userModel.get('id');
             }
 
-            if (_.any(loadedPermissions.user.roles, {name: 'Editor'})) {
+            if (loadedPermissions.user && _.any(loadedPermissions.user.roles, {name: 'Editor'})) {
                 // If this is the same user that requests the operation allow it.
                 hasUserPermission = context.user === userModel.get('id');
 
@@ -484,12 +466,12 @@ User = ghostBookshelf.Model.extend({
 
         if (action === 'destroy') {
             // Owner cannot be deleted EVER
-            if (userModel.hasRole('Owner')) {
-                return Promise.reject();
+            if (loadedPermissions.user && userModel.hasRole('Owner')) {
+                return Promise.reject(new errors.NoPermissionError('You do not have permission to perform this action'));
             }
 
             // Users with the role 'Editor' have complex permissions when the action === 'destroy'
-            if (_.any(loadedPermissions.user.roles, {name: 'Editor'})) {
+            if (loadedPermissions.user && _.any(loadedPermissions.user.roles, {name: 'Editor'})) {
                 // If this is the same user that requests the operation allow it.
                 hasUserPermission = context.user === userModel.get('id');
 
@@ -502,7 +484,7 @@ User = ghostBookshelf.Model.extend({
             return Promise.resolve();
         }
 
-        return Promise.reject();
+        return Promise.reject(new errors.NoPermissionError('You do not have permission to perform this action'));
     },
 
     setWarning: function setWarning(user, options) {
@@ -537,7 +519,7 @@ User = ghostBookshelf.Model.extend({
             if (user.get('status') === 'invited' || user.get('status') === 'invited-pending' ||
                     user.get('status') === 'inactive'
                 ) {
-                return Promise.reject(new Error('The user with that email address is inactive.'));
+                return Promise.reject(new errors.NoPermissionError('The user with that email address is inactive.'));
             }
             if (user.get('status') !== 'locked') {
                 return bcryptCompare(object.password, user.get('password')).then(function then(matched) {
@@ -586,14 +568,15 @@ User = ghostBookshelf.Model.extend({
 
     /**
      * Naive change password method
-     * @param {String} oldPassword
-     * @param {String} newPassword
-     * @param {String} ne2Password
-     * @param {Integer} userId
+     * @param {Object} object
      * @param {Object} options
      */
-    changePassword: function changePassword(oldPassword, newPassword, ne2Password, userId, options) {
+    changePassword: function changePassword(object, options) {
         var self = this,
+            newPassword = object.newPassword,
+            ne2Password = object.ne2Password,
+            userId = object.user_id,
+            oldPassword = object.oldPassword,
             user;
 
         if (newPassword !== ne2Password) {
@@ -659,25 +642,25 @@ User = ghostBookshelf.Model.extend({
 
         // Check if invalid structure
         if (!parts || parts.length !== 3) {
-            return Promise.reject(new Error('Invalid token structure'));
+            return Promise.reject(new errors.BadRequestError('Invalid token structure'));
         }
 
         expires = parseInt(parts[0], 10);
         email = parts[1];
 
         if (isNaN(expires)) {
-            return Promise.reject(new Error('Invalid token expiration'));
+            return Promise.reject(new errors.BadRequestError('Invalid token expiration'));
         }
 
         // Check if token is expired to prevent replay attacks
         if (expires < Date.now()) {
-            return Promise.reject(new Error('Expired token'));
+            return Promise.reject(new errors.ValidationError('Expired token'));
         }
 
         // to prevent brute force attempts to reset the password the combination of email+expires is only allowed for
         // 10 attempts
         if (tokenSecurity[email + '+' + expires] && tokenSecurity[email + '+' + expires].count >= 10) {
-            return Promise.reject(new Error('Token locked'));
+            return Promise.reject(new errors.NoPermissionError('Token locked'));
         }
 
         return this.generateResetToken(email, expires, dbHash).then(function then(generatedToken) {
@@ -702,15 +685,19 @@ User = ghostBookshelf.Model.extend({
             tokenSecurity[email + '+' + expires] = {
                 count: tokenSecurity[email + '+' + expires] ? tokenSecurity[email + '+' + expires].count + 1 : 1
             };
-            return Promise.reject(new Error('Invalid token'));
+            return Promise.reject(new errors.BadRequestError('Invalid token'));
         });
     },
 
-    resetPassword: function resetPassword(token, newPassword, ne2Password, dbHash) {
-        var self = this;
+    resetPassword: function resetPassword(options) {
+        var self = this,
+            token = options.token,
+            newPassword = options.newPassword,
+            ne2Password = options.ne2Password,
+            dbHash = options.dbHash;
 
         if (newPassword !== ne2Password) {
-            return Promise.reject(new Error('Your new passwords do not match'));
+            return Promise.reject(new errors.ValidationError('Your new passwords do not match'));
         }
 
         if (!validatePasswordLength(newPassword)) {
@@ -726,7 +713,7 @@ User = ghostBookshelf.Model.extend({
             );
         }).then(function then(results) {
             if (!results[0]) {
-                return Promise.reject(new Error('User not found'));
+                return Promise.reject(new errors.NotFoundError('User not found'));
             }
 
             // Update the user with the new password hash

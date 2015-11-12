@@ -3,7 +3,7 @@ import {request as ajax} from 'ic-ajax';
 
 var DownloadCountPoller = Ember.Object.extend({
     url: null,
-    count: 'many, many',
+    count: '',
     runId: null,
 
     init: function () {
@@ -12,7 +12,7 @@ var DownloadCountPoller = Ember.Object.extend({
     },
 
     poll: function () {
-        var interval = 3000,
+        var interval = 2000,
             runId;
 
         runId = Ember.run.later(this, function () {
@@ -27,9 +27,16 @@ var DownloadCountPoller = Ember.Object.extend({
         var self = this;
 
         ajax(this.get('url')).then(function (data) {
-            self.set('count', data.count.toLocaleString());
+            var count = data.count.toString(),
+                pattern = /(-?\d+)(\d{3})/;
+
+            while (pattern.test(count)) {
+                count = count.replace(pattern, '$1,$2');
+            }
+
+            self.set('count', count);
         }).catch(function () {
-            self.set('count', 'many, many');
+            self.set('count', '');
         });
     }
 });

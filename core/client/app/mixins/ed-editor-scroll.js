@@ -1,8 +1,7 @@
 import Ember from 'ember';
-
 import setScrollClassName from 'ghost/utils/set-scroll-classname';
 
-var EditorScroll = Ember.Mixin.create({
+export default Ember.Mixin.create({
     /**
      * Determine if the cursor is at the end of the textarea
      */
@@ -62,7 +61,7 @@ var EditorScroll = Ember.Mixin.create({
      */
     scrollHandler: function () {
         this.set('scrollThrottle', Ember.run.throttle(this, function () {
-            this.set('scrollInfo', this.getScrollInfo());
+            this.sendAction('updateScrollInfo', this.getScrollInfo());
         }, 10));
     },
 
@@ -102,5 +101,3 @@ var EditorScroll = Ember.Mixin.create({
         this.detachScrollHandlers();
     }
 });
-
-export default EditorScroll;

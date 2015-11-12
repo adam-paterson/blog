@@ -1,20 +1,8 @@
 var _              = require('lodash'),
     ghostBookshelf = require('./base'),
     events         = require('../events'),
-
     Tag,
     Tags;
-
-function addPostCount(options, obj) {
-    if (options.include && options.include.indexOf('post_count') > -1) {
-        obj.query('select', 'tags.*');
-        obj.query('count', 'posts_tags.id as post_count');
-        obj.query('leftJoin', 'posts_tags', 'tag_id', 'tags.id');
-        obj.query('groupBy', 'tag_id', 'tags.id');
-
-        options.include = _.pull([].concat(options.include), 'post_count');
-    }
-}
 
 Tag = ghostBookshelf.Model.extend({
 
@@ -60,6 +48,8 @@ Tag = ghostBookshelf.Model.extend({
     },
 
     toJSON: function toJSON(options) {
+        options = options || {};
+
         var attrs = ghostBookshelf.Model.prototype.toJSON.call(this, options);
 
         attrs.parent = attrs.parent || attrs.parent_id;
@@ -68,10 +58,6 @@ Tag = ghostBookshelf.Model.extend({
         return attrs;
     }
 }, {
-    setupFilters: function setupFilters() {
-        return {};
-    },
-
     findPageDefaultOptions: function findPageDefaultOptions() {
         return {
             where: {}
@@ -83,7 +69,6 @@ Tag = ghostBookshelf.Model.extend({
     },
 
     processOptions: function processOptions(itemCollection, options) {
-        addPostCount(options, itemCollection);
         return options;
     },
 
@@ -93,7 +78,7 @@ Tag = ghostBookshelf.Model.extend({
             // whitelists for the `options` hash argument on methods, by method name.
             // these are the only options that can be passed to Bookshelf / Knex.
             validOptions = {
-                findPage: ['page', 'limit']
+                findPage: ['page', 'limit', 'columns', 'order']
             };
 
         if (validOptions[methodName]) {
@@ -114,8 +99,6 @@ Tag = ghostBookshelf.Model.extend({
         data = this.filterData(data, 'findOne');
 
         var tag = this.forge(data);
-
-        addPostCount(options, tag);
 
         // Add related objects
         options.withRelated = _.union(options.withRelated, options.include);
