@@ -12,26 +12,23 @@ Tag = ghostBookshelf.Model.extend({
         events.emit('tag' + '.' + event, this);
     },
 
-    initialize: function initialize() {
-        ghostBookshelf.Model.prototype.initialize.apply(this, arguments);
-
-        this.on('created', function onCreated(model) {
-            model.emitChange('added');
-        });
-        this.on('updated', function onUpdated(model) {
-            model.emitChange('edited');
-        });
-        this.on('destroyed', function onDestroyed(model) {
-            model.emitChange('deleted');
-        });
+    onCreated: function onCreated(model) {
+        model.emitChange('added');
     },
 
-    saving: function saving(newPage, attr, options) {
-        /*jshint unused:false*/
+    onUpdated: function onUpdated(model) {
+        model.emitChange('edited');
+    },
 
+    onDestroyed: function onDestroyed(model) {
+        model.emitChange('deleted');
+    },
+
+    onSaving: function onSaving(newPage, attr, options) {
+        /*jshint unused:false*/
         var self = this;
 
-        ghostBookshelf.Model.prototype.saving.apply(this, arguments);
+        ghostBookshelf.Model.prototype.onSaving.apply(this, arguments);
 
         if (this.hasChanged('slug') || !this.get('slug')) {
             // Pass the new slug through the generator to strip illegal characters, detect duplicates
@@ -58,17 +55,14 @@ Tag = ghostBookshelf.Model.extend({
         return attrs;
     }
 }, {
-    findPageDefaultOptions: function findPageDefaultOptions() {
-        return {
-            where: {}
-        };
-    },
-
     orderDefaultOptions: function orderDefaultOptions() {
         return {};
     },
 
-    processOptions: function processOptions(itemCollection, options) {
+    /**
+     * @deprecated in favour of filter
+     */
+    processOptions: function processOptions(options) {
         return options;
     },
 
@@ -78,7 +72,9 @@ Tag = ghostBookshelf.Model.extend({
             // whitelists for the `options` hash argument on methods, by method name.
             // these are the only options that can be passed to Bookshelf / Knex.
             validOptions = {
-                findPage: ['page', 'limit', 'columns', 'order']
+                findPage: ['page', 'limit', 'columns', 'filter', 'order'],
+                findAll: ['columns'],
+                findOne: ['visibility']
             };
 
         if (validOptions[methodName]) {

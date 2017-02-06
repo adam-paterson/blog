@@ -8,36 +8,45 @@
 
 var hbs             = require('express-hbs'),
     _               = require('lodash'),
-    config          = require('../config'),
-    utils           = require('./utils'),
+    utils           = require('../utils'),
+    localUtils      = require('./utils'),
+    visibilityFilter = require('../utils/visibility-filter'),
     tags;
 
 tags = function (options) {
     options = options || {};
     options.hash = options.hash || {};
 
-    var autolink = options.hash && _.isString(options.hash.autolink) && options.hash.autolink === 'false' ? false : true,
-        separator = options.hash && _.isString(options.hash.separator) ? options.hash.separator : ', ',
-        prefix = options.hash && _.isString(options.hash.prefix) ? options.hash.prefix : '',
-        suffix = options.hash && _.isString(options.hash.suffix) ? options.hash.suffix : '',
-        output = '';
+    var autolink   = !(_.isString(options.hash.autolink) && options.hash.autolink === 'false'),
+        separator  = _.isString(options.hash.separator) ? options.hash.separator : ', ',
+        prefix     = _.isString(options.hash.prefix) ? options.hash.prefix : '',
+        suffix     = _.isString(options.hash.suffix) ? options.hash.suffix : '',
+        limit      = options.hash.limit ? parseInt(options.hash.limit, 10) : undefined,
+        from       = options.hash.from ? parseInt(options.hash.from, 10) : 1,
+        to         = options.hash.to ? parseInt(options.hash.to, 10) : undefined,
+        visibility = localUtils.parseVisibility(options),
+        output     = '';
 
     function createTagList(tags) {
-        var tagNames = _.pluck(tags, 'name');
-
-        if (autolink) {
-            return _.map(tags, function (tag) {
-                return utils.linkTemplate({
-                    url: config.urlFor('tag', {tag: tag}),
-                    text: _.escape(tag.name)
-                });
-            }).join(separator);
+        function processTag(tag) {
+            return autolink ? localUtils.linkTemplate({
+                url: utils.url.urlFor('tag', {tag: tag}),
+                text: _.escape(tag.name)
+            }) : _.escape(tag.name);
         }
-        return _.escape(tagNames.join(separator));
+
+        return visibilityFilter(tags, visibility, !!options.hash.visibility, processTag);
     }
 
     if (this.tags && this.tags.length) {
-        output = prefix + createTagList(this.tags) + suffix;
+        output = createTagList(this.tags);
+        from -= 1; // From uses 1-indexed, but array uses 0-indexed.
+        to = to || limit + from || output.length;
+        output = output.slice(from, to).join(separator);
+    }
+
+    if (output) {
+        output = prefix + output + suffix;
     }
 
     return new hbs.handlebars.SafeString(output);

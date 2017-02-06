@@ -1,30 +1,40 @@
 // # Bootup
 // This file needs serious love & refactoring
 
+/**
+ * make sure overrides get's called first!
+ * - keeping the overrides require here works for installing Ghost as npm!
+ *
+ * the call order is the following:
+ * - root index requires core module
+ * - core index requires server
+ * - overrides is the first package to load
+ */
+require('./overrides');
+
 // Module dependencies
-var express     = require('express'),
-    hbs         = require('express-hbs'),
-    compress    = require('compression'),
-    fs          = require('fs'),
-    uuid        = require('node-uuid'),
-    Promise     = require('bluebird'),
-    i18n        = require('./i18n'),
-
-    api         = require('./api'),
-    config      = require('./config'),
-    errors      = require('./errors'),
-    helpers     = require('./helpers'),
-    mailer      = require('./mail'),
-    middleware  = require('./middleware'),
-    migrations  = require('./data/migration'),
-    models      = require('./models'),
+var debug = require('debug')('ghost:boot:init'),
+    uuid = require('uuid'),
+    Promise = require('bluebird'),
+    KnexMigrator = require('knex-migrator'),
+    config = require('./config'),
+    logging = require('./logging'),
+    errors = require('./errors'),
+    i18n = require('./i18n'),
+    api = require('./api'),
+    models = require('./models'),
     permissions = require('./permissions'),
-    apps        = require('./apps'),
-    sitemap     = require('./data/xml/sitemap'),
-    xmlrpc      = require('./data/xml/xmlrpc'),
+    apps = require('./apps'),
+    auth = require('./auth'),
+    xmlrpc = require('./data/xml/xmlrpc'),
+    slack = require('./data/slack'),
     GhostServer = require('./ghost-server'),
-    validateThemes = require('./utils/validate-themes'),
-
+    scheduling = require('./scheduling'),
+    readDirectory = require('./utils/read-directory'),
+    utils = require('./utils'),
+    knexMigrator = new KnexMigrator({
+        knexMigratorFilePath: config.get('paths:appRoot')
+    }),
     dbHash;
 
 function initDbHashAndFirstRun() {
@@ -48,171 +58,126 @@ function initDbHashAndFirstRun() {
     });
 }
 
-// Checks for the existence of the "built" javascript files from grunt concat.
-// Returns a promise that will be resolved if all files exist or rejected if
-// any are missing.
-function builtFilesExist() {
-    var deferreds = [],
-        location = config.paths.clientAssets,
-        fileNames = ['ghost.js', 'vendor.js', 'ghost.css', 'vendor.css'];
-
-    if (process.env.NODE_ENV === 'production') {
-        // Production uses `.min` files
-        fileNames = fileNames.map(function (file) {
-            return file.replace('.', '.min.');
-        });
-    }
-
-    function checkExist(fileName) {
-        var errorMessage = 'Javascript files have not been built.',
-            errorHelp = '\nPlease read the getting started instructions at:' +
-                        '\nhttps://github.com/TryGhost/Ghost#getting-started';
-
-        return new Promise(function (resolve, reject) {
-            fs.stat(fileName, function (statErr) {
-                var exists = (statErr) ? false : true,
-                    err;
-
-                if (exists) {
-                    resolve(true);
-                } else {
-                    err = new Error(errorMessage);
-
-                    err.help = errorHelp;
-                    reject(err);
-                }
-            });
-        });
-    }
-
-    fileNames.forEach(function (fileName) {
-        deferreds.push(checkExist(location + fileName));
-    });
-
-    return Promise.all(deferreds);
-}
-
-// This is run after every initialization is done, right before starting server.
-// Its main purpose is to move adding notifications here, so none of the submodules
-// should need to include api, which previously resulted in circular dependencies.
-// This is also a "one central repository" of adding startup notifications in case
-// in the future apps will want to hook into here
-function initNotifications() {
-    if (mailer.state && mailer.state.usingDirect) {
-        api.notifications.add({notifications: [{
-            type: 'info',
-            message: [
-                'Ghost is attempting to use a direct method to send email.',
-                'It is recommended that you explicitly configure an email service.',
-                'See <a href=\'http://support.ghost.org/mail\' target=\'_blank\'>http://support.ghost.org/mail</a> for instructions'
-            ].join(' ')
-        }]}, {context: {internal: true}});
-    }
-    if (mailer.state && mailer.state.emailDisabled) {
-        api.notifications.add({notifications: [{
-            type: 'warn',
-            message: [
-                'Ghost is currently unable to send email.',
-                'See <a href=\'http://support.ghost.org/mail\' target=\'_blank\'>http://support.ghost.org/mail</a> for instructions'
-            ].join(' ')
-        }]}, {context: {internal: true}});
-    }
-}
-
 // ## Initialise Ghost
 // Sets up the express server instances, runs init on a bunch of stuff, configures views, helpers, routes and more
 // Finally it returns an instance of GhostServer
 function init(options) {
-    // Get reference to an express app instance.
-    var blogApp = express(),
-        adminApp = express();
+    debug('Init Start...');
+    options = options || {};
+
+    var ghostServer, parentApp;
 
     // ### Initialisation
     // The server and its dependencies require a populated config
     // It returns a promise that is resolved when the application
     // has finished starting up.
 
-    // Load our config.js file from the local file system.
-    return config.load(options.config).then(function () {
-        return config.checkDeprecated();
+    // Initialize Internationalization
+    i18n.init();
+    debug('I18n done');
+
+    return readDirectory(config.getContentPath('apps')).then(function loadThemes(result) {
+        config.set('paths:availableApps', result);
+        return api.themes.loadThemes();
     }).then(function () {
-        // Make sure javascript files have been built via grunt concat
-        return builtFilesExist();
+        debug('Themes & apps done');
+
+        models.init();
     }).then(function () {
-        // Initialise the models
-        return models.init();
-    }).then(function () {
-        // Initialize migrations
-        return migrations.init();
+        return knexMigrator.isDatabaseOK()
+            .catch(function (outerErr) {
+                if (outerErr.code === 'DB_NOT_INITIALISED') {
+                    throw outerErr;
+                }
+
+                // CASE: migration table does not exist, figure out if database is compatible
+                return models.Settings.findOne({key: 'databaseVersion', context: {internal: true}})
+                    .then(function (response) {
+                        // CASE: no db version key, database is compatible
+                        if (!response) {
+                            throw outerErr;
+                        }
+
+                        throw new errors.DatabaseVersionError({
+                            message: 'Your database version is not compatible with Ghost 1.0.0 Alpha (master branch)',
+                            context: 'Want to keep your DB? Use Ghost < 1.0.0 or the "stable" branch. Otherwise please delete your DB and restart Ghost.',
+                            help: 'More information on the Ghost 1.0.0 Alpha at https://support.ghost.org/v1-0-alpha'
+                        });
+                    })
+                    .catch(function (err) {
+                        // CASE: settings table does not exist
+                        if (err.errno === 1 || err.errno === 1146) {
+                            throw outerErr;
+                        }
+
+                        throw err;
+                    });
+            });
     }).then(function () {
         // Populate any missing default settings
         return models.Settings.populateDefaults();
     }).then(function () {
-        // Initialize the settings cache
-        return api.init();
+        debug('Models & database done');
+
+        return api.settings.updateSettingsCache();
     }).then(function () {
+        debug('Update settings cache done');
         // Initialize the permissions actions and objects
         // NOTE: Must be done before initDbHashAndFirstRun calls
         return permissions.init();
     }).then(function () {
+        debug('Permissions done');
         return Promise.join(
             // Check for or initialise a dbHash.
             initDbHashAndFirstRun(),
-            // Initialize mail
-            mailer.init(),
             // Initialize apps
             apps.init(),
-            // Initialize sitemaps
-            sitemap.init(),
             // Initialize xmrpc ping
-            xmlrpc.init()
+            xmlrpc.listen(),
+            // Initialize slack ping
+            slack.listen()
         );
     }).then(function () {
-        var adminHbs = hbs.create();
+        debug('Apps, XMLRPC, Slack done');
 
-        // Initialize Internationalization
-        i18n.init();
+        // Setup our collection of express apps
+        parentApp = require('./app')();
 
-        // Output necessary notifications on init
-        initNotifications();
-        // ##Configuration
+        debug('Express Apps done');
 
-        // return the correct mime type for woff files
-        express.static.mime.define({'application/font-woff': ['woff']});
+        // runs asynchronous
+        auth.init({
+            authType: config.get('auth:type'),
+            ghostAuthUrl: config.get('auth:url'),
+            redirectUri: utils.url.urlFor('admin', true),
+            clientUri: utils.url.urlFor('home', true),
+            clientName: api.settings.cache.get('title'),
+            clientDescription: api.settings.cache.get('description')
+        }).then(function (response) {
+            parentApp.use(response.auth);
+        }).catch(function onAuthError(err) {
+            logging.error(err);
+        });
+    }).then(function () {
+        debug('Auth done');
+        return new GhostServer(parentApp);
+    }).then(function (_ghostServer) {
+        ghostServer = _ghostServer;
 
-        // enabled gzip compression by default
-        if (config.server.compress !== false) {
-            blogApp.use(compress());
-        }
-
-        // ## View engine
-        // set the view engine
-        blogApp.set('view engine', 'hbs');
-
-        // Create a hbs instance for admin and init view engine
-        adminApp.set('view engine', 'hbs');
-        adminApp.engine('hbs', adminHbs.express3({}));
-
-        // Load helpers
-        helpers.loadCoreHelpers(adminHbs);
-
-        // ## Middleware and Routing
-        middleware(blogApp, adminApp);
-
-        // Log all theme errors and warnings
-        validateThemes(config.paths.themePath)
-            .catch(function (result) {
-                // TODO: change `result` to something better
-                result.errors.forEach(function (err) {
-                    errors.logError(err.message, err.context, err.help);
-                });
-
-                result.warnings.forEach(function (warn) {
-                    errors.logWarn(warn.message, warn.context, warn.help);
-                });
-            });
-
-        return new GhostServer(blogApp);
+        // scheduling can trigger api requests, that's why we initialize the module after the ghost server creation
+        // scheduling module can create x schedulers with different adapters
+        debug('Server done');
+        return scheduling.init({
+            schedulerUrl: config.get('scheduling').schedulerUrl,
+            active: config.get('scheduling').active,
+            apiUrl: utils.url.urlFor('api', true),
+            internalPath: config.get('paths').internalSchedulingPath,
+            contentPath: config.getContentPath('scheduling')
+        });
+    }).then(function () {
+        debug('Scheduling done');
+        debug('...Init End');
+        return ghostServer;
     });
 }
 

@@ -1,21 +1,21 @@
-/*global describe, it, before, after */
-/*jshint expr:true*/
 var testUtils     = require('../../../utils'),
     should        = require('should'),
     supertest     = require('supertest'),
-
-    ghost         = require('../../../../../core'),
-
+    config        = require('../../../../../core/server/config'),
+    ghost         = testUtils.startGhost,
     request;
 
 describe('Settings API', function () {
-    var accesstoken = '';
+    var accesstoken = '', ghostServer;
 
     before(function (done) {
         // starting ghost automatically populates the db
         // TODO: prevent db init, and manage bringing up the DB with fixtures ourselves
-        ghost().then(function (ghostServer) {
-            request = supertest.agent(ghostServer.rootApp);
+        ghost().then(function (_ghostServer) {
+            ghostServer = _ghostServer;
+            return ghostServer.start();
+        }).then(function () {
+            request = supertest.agent(config.get('url'));
         }).then(function () {
             return testUtils.doAuth(request);
         }).then(function (token) {
@@ -24,10 +24,11 @@ describe('Settings API', function () {
         }).catch(done);
     });
 
-    after(function (done) {
-        testUtils.clearData().then(function () {
-            done();
-        }).catch(done);
+    after(function () {
+        return testUtils.clearData()
+            .then(function () {
+                return ghostServer.stop();
+            });
     });
 
     // TODO: currently includes values of type=core
@@ -44,7 +45,7 @@ describe('Settings API', function () {
 
                 should.not.exist(res.headers['x-cache-invalidate']);
                 var jsonResponse = res.body;
-                jsonResponse.should.exist;
+                should.exist(jsonResponse);
 
                 testUtils.API.checkResponse(jsonResponse, 'settings');
                 done();
@@ -65,12 +66,12 @@ describe('Settings API', function () {
                 should.not.exist(res.headers['x-cache-invalidate']);
                 var jsonResponse = res.body;
 
-                jsonResponse.should.exist;
-                jsonResponse.settings.should.exist;
+                should.exist(jsonResponse);
+                should.exist(jsonResponse.settings);
 
-                testUtils.API.checkResponseValue(jsonResponse.settings[0], ['id', 'uuid', 'key', 'value', 'type', 'created_at', 'created_by', 'updated_at', 'updated_by']);
+                testUtils.API.checkResponseValue(jsonResponse.settings[0], ['id', 'key', 'value', 'type', 'created_at', 'created_by', 'updated_at', 'updated_by']);
                 jsonResponse.settings[0].key.should.eql('title');
-                testUtils.API.isISO8601(jsonResponse.settings[0].created_at).should.be.true;
+                testUtils.API.isISO8601(jsonResponse.settings[0].created_at).should.be.true();
                 done();
             });
     });
@@ -78,6 +79,7 @@ describe('Settings API', function () {
     it('can\'t retrieve non existent setting', function (done) {
         request.get(testUtils.API.getApiQuery('settings/testsetting/'))
             .set('Authorization', 'Bearer ' + accesstoken)
+            .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect('Cache-Control', testUtils.cacheRules.private)
             .expect(404)
@@ -88,8 +90,8 @@ describe('Settings API', function () {
 
                 should.not.exist(res.headers['x-cache-invalidate']);
                 var jsonResponse = res.body;
-                jsonResponse.should.exist;
-                jsonResponse.errors.should.exist;
+                should.exist(jsonResponse);
+                should.exist(jsonResponse.errors);
                 testUtils.API.checkResponseValue(jsonResponse.errors[0], ['message', 'errorType']);
                 done();
             });
@@ -113,8 +115,8 @@ describe('Settings API', function () {
                         ]
                     };
 
-                jsonResponse.should.exist;
-                jsonResponse.settings.should.exist;
+                should.exist(jsonResponse);
+                should.exist(jsonResponse.settings);
 
                 request.put(testUtils.API.getApiQuery('settings/'))
                     .set('Authorization', 'Bearer ' + accesstoken)
@@ -129,7 +131,7 @@ describe('Settings API', function () {
 
                         var putBody = res.body;
                         res.headers['x-cache-invalidate'].should.eql('/*');
-                        putBody.should.exist;
+                        should.exist(putBody);
                         putBody.settings[0].value.should.eql(changedValue);
                         testUtils.API.checkResponse(putBody, 'settings');
                         done();
@@ -140,6 +142,7 @@ describe('Settings API', function () {
     it('can\'t edit settings with invalid accesstoken', function (done) {
         request.get(testUtils.API.getApiQuery('settings/'))
             .set('Authorization', 'Bearer ' + accesstoken)
+            .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect('Cache-Control', testUtils.cacheRules.private)
             .end(function (err, res) {
@@ -149,7 +152,7 @@ describe('Settings API', function () {
 
                 var jsonResponse = res.body,
                     changedValue = 'Ghost changed';
-                jsonResponse.should.exist;
+                should.exist(jsonResponse);
                 jsonResponse.title = changedValue;
 
                 request.put(testUtils.API.getApiQuery('settings/'))
@@ -170,6 +173,7 @@ describe('Settings API', function () {
     it('can\'t edit non existent setting', function (done) {
         request.get(testUtils.API.getApiQuery('settings/'))
             .set('Authorization', 'Bearer ' + accesstoken)
+            .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect('Cache-Control', testUtils.cacheRules.private)
             .end(function (err, res) {
@@ -179,7 +183,7 @@ describe('Settings API', function () {
 
                 var jsonResponse = res.body,
                     newValue = 'new value';
-                jsonResponse.should.exist;
+                should.exist(jsonResponse);
                 should.exist(jsonResponse.settings);
                 jsonResponse.settings = [{key: 'testvalue', value: newValue}];
 
@@ -196,7 +200,7 @@ describe('Settings API', function () {
 
                         jsonResponse = res.body;
                         should.not.exist(res.headers['x-cache-invalidate']);
-                        jsonResponse.errors.should.exist;
+                        should.exist(jsonResponse.errors);
                         testUtils.API.checkResponseValue(jsonResponse.errors[0], ['message', 'errorType']);
                         done();
                     });

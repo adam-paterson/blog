@@ -1,17 +1,22 @@
 var crypto = require('crypto'),
     fs     = require('fs'),
     path   = require('path'),
-    config = require('../config');
+    config = require('../config'),
+    utils  = require('../utils');
 
 // ### ServeSharedFile Middleware
 // Handles requests to robots.txt and favicon.ico (and caches them)
 function serveSharedFile(file, type, maxAge) {
     var content,
-        filePath = path.join(config.paths.corePath, 'shared', file),
-        re = /(\{\{blog-url\}\})/g;
+        corePath = config.get('paths').corePath,
+        filePath,
+        blogRegex = /(\{\{blog-url\}\})/g,
+        apiRegex = /(\{\{api-url\}\})/g;
+
+    filePath = file.match(/^shared/) ? path.join(corePath, file) : path.join(corePath, 'shared', file);
 
     return function serveSharedFile(req, res, next) {
-        if (req.url === '/' + file) {
+        if (req.path === '/' + file) {
             if (content) {
                 res.writeHead(200, content.headers);
                 res.end(content.body);
@@ -20,8 +25,10 @@ function serveSharedFile(file, type, maxAge) {
                     if (err) {
                         return next(err);
                     }
-                    if (type === 'text/xsl' || type === 'text/plain') {
-                        buf = buf.toString().replace(re, config.url.replace(/\/$/, ''));
+
+                    if (type === 'text/xsl' || type === 'text/plain' || type === 'application/javascript') {
+                        buf = buf.toString().replace(blogRegex, utils.url.urlFor('home', true).replace(/\/$/, ''));
+                        buf = buf.toString().replace(apiRegex, utils.url.urlFor('api', {cors: true}, true));
                     }
                     content = {
                         headers: {

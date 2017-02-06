@@ -7,11 +7,11 @@ var _            = require('lodash'),
     canThis      = require('../permissions').canThis,
     errors       = require('../errors'),
     utils        = require('./utils'),
+    i18n         = require('../i18n'),
 
     docName      = 'settings',
     settings,
 
-    updateConfigTheme,
     updateSettingsCache,
     settingsFilter,
     filterPaths,
@@ -24,27 +24,9 @@ var _            = require('lodash'),
     /**
      * ## Cache
      * Holds cached settings
-     * @private
      * @type {{}}
      */
     settingsCache = {};
-
-/**
-* ### Updates Config Theme Settings
-* Maintains the cache of theme specific variables that are reliant on settings.
-* @private
-*/
-updateConfigTheme = function () {
-    config.set({
-        theme: {
-            title: (settingsCache.title && settingsCache.title.value) || '',
-            description: (settingsCache.description && settingsCache.description.value) || '',
-            logo: (settingsCache.logo && settingsCache.logo.value) || '',
-            cover: (settingsCache.cover && settingsCache.cover.value) || '',
-            navigation: (settingsCache.navigation && JSON.parse(settingsCache.navigation.value)) || []
-        }
-    });
-};
 
 /**
  * ### Update Settings Cache
@@ -53,7 +35,8 @@ updateConfigTheme = function () {
  * @param {Object} settings
  * @returns {Settings}
  */
-updateSettingsCache = function (settings) {
+updateSettingsCache = function (settings, options) {
+    options = options || {};
     settings = settings || {};
 
     if (!_.isEmpty(settings)) {
@@ -61,16 +44,13 @@ updateSettingsCache = function (settings) {
             settingsCache[key] = setting;
         });
 
-        updateConfigTheme();
-
         return Promise.resolve(settingsCache);
     }
 
-    return dataProvider.Settings.findAll()
+    return dataProvider.Settings.findAll(options)
         .then(function (result) {
-            settingsCache = readSettingsResult(result.models);
-
-            updateConfigTheme();
+            // keep reference and update all keys
+            _.extend(settingsCache, readSettingsResult(result.models));
 
             return settingsCache;
         });
@@ -87,7 +67,7 @@ updateSettingsCache = function (settings) {
  * @returns {*}
  */
 settingsFilter = function (settings, filter) {
-    return _.object(_.filter(_.pairs(settings), function (setting) {
+    return _.fromPairs(_.filter(_.toPairs(settings), function (setting) {
         if (filter) {
             return _.some(filter.split(','), function (f) {
                 return setting[1].type === f;
@@ -155,10 +135,11 @@ readSettingsResult = function (settingsModels) {
 
             return memo;
         }, {}),
-        themes = config.paths.availableThemes,
-        apps = config.paths.availableApps,
+        themes = config.get('paths').availableThemes,
+        apps = config.get('paths').availableApps,
         res;
 
+    // @TODO: remove availableThemes from settings cache and create an endpoint to fetch themes
     if (settings.activeTheme && themes) {
         res = filterPaths(themes, settings.activeTheme.value);
 
@@ -227,8 +208,8 @@ populateDefaultSetting = function (key) {
             return Promise.reject(err);
         }
 
-        // TODO: Different kind of error?
-        return Promise.reject(new errors.NotFoundError('Problem finding setting: ' + key));
+        // TODO: different kind of error?
+        return Promise.reject(new errors.NotFoundError({message: i18n.t('errors.api.settings.problemFindingSetting', {key: key})}));
     });
 };
 
@@ -243,12 +224,12 @@ canEditAllSettings = function (settingsInfo, options) {
     var checkSettingPermissions = function (setting) {
             if (setting.type === 'core' && !(options.context && options.context.internal)) {
                 return Promise.reject(
-                    new errors.NoPermissionError('Attempted to access core setting from external request')
+                    new errors.NoPermissionError({message: i18n.t('errors.api.settings.accessCoreSettingFromExtReq')})
                 );
             }
 
             return canThis(options.context).edit.setting(setting.key).catch(function () {
-                return Promise.reject(new errors.NoPermissionError('You do not have permission to edit settings.'));
+                return Promise.reject(new errors.NoPermissionError({message: i18n.t('errors.api.settings.noPermissionToEditSettings')}));
             });
         },
         checks = _.map(settingsInfo, function (settingInfo) {
@@ -327,7 +308,7 @@ settings = {
 
                 if (setting.type === 'core' && !(options.context && options.context.internal)) {
                     return Promise.reject(
-                        new errors.NoPermissionError('Attempted to access core setting from external request')
+                        new errors.NoPermissionError({message: i18n.t('errors.api.settings.accessCoreSettingFromExtReq')})
                     );
                 }
 
@@ -338,7 +319,7 @@ settings = {
                 return canThis(options.context).read.setting(options.key).then(function () {
                     return settingsResult(result);
                 }, function () {
-                    return Promise.reject(new errors.NoPermissionError('You do not have permission to read settings.'));
+                    return Promise.reject(new errors.NoPermissionError({message: i18n.t('errors.api.settings.noPermissionToReadSettings')}));
                 });
             };
 
@@ -357,7 +338,7 @@ settings = {
 
     /**
      * ### Edit
-     * Update properties of a post
+     * Update properties of a setting
      * @param {{settings: }} object Setting or a single string name
      * @param {{id (required), include,...}} options (optional) or a single string value
      * @return {Promise(Setting)} Edited Setting
@@ -404,4 +385,38 @@ settings = {
 };
 
 module.exports = settings;
+
+/**
+ * @TODO:
+ * - move settings cache somewhere else e.q. listen on model changes
+ *
+ * IMPORTANT:
+ * We store settings with a type and a key in the database.
+ *
+ * {
+ *   type: core
+ *   key: dbHash
+ *   value: ...
+ * }
+ *
+ * But the settings cache does not allow requesting a value by type, only by key.
+ * e.g. settings.cache.get('dbHash')
+ */
+module.exports.cache = {
+    get: function get(key) {
+        if (!settingsCache[key]) {
+            return;
+        }
+
+        try {
+            return JSON.parse(settingsCache[key].value);
+        } catch (err) {
+            return settingsCache[key].value;
+        }
+    },
+    getAll: function getAll() {
+        return settingsCache;
+    }
+};
+
 module.exports.updateSettingsCache = updateSettingsCache;

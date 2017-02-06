@@ -6,6 +6,7 @@ var Promise = require('bluebird'),
     errors  = require('../errors'),
     permissions = require('../permissions'),
     validation  = require('../data/validation'),
+    i18n    = require('../i18n'),
 
     utils;
 
@@ -23,7 +24,7 @@ utils = {
     // ### Manual Default Options
     // These must be provided by the endpoint
     // browseDefaultOptions - valid for all browse api endpoints
-    browseDefaultOptions: ['page', 'limit', 'fields', 'filter', 'order'],
+    browseDefaultOptions: ['page', 'limit', 'fields', 'filter', 'order', 'debug'],
     // idDefaultOptions - valid whenever an id is valid
     idDefaultOptions: ['id'],
 
@@ -42,6 +43,7 @@ utils = {
          */
         return function doValidate() {
             var object, options, permittedOptions;
+
             if (arguments.length === 2) {
                 object = arguments[0];
                 options = _.clone(arguments[1]) || {};
@@ -89,7 +91,7 @@ utils = {
                 }
 
                 // For now, we can only handle showing the first validation error
-                return errors.logAndRejectError(validationErrors[0]);
+                return Promise.reject(validationErrors[0]);
             }
 
             // If we got an object, check that too
@@ -108,11 +110,13 @@ utils = {
 
     validateOptions: function validateOptions(options) {
         var globalValidations = {
-                id: {matches: /^\d+|me$/},
+                id: {matches: /^[a-f\d]{24}$|^1$|me/i},
                 uuid: {isUUID: true},
                 slug: {isSlug: true},
                 page: {matches: /^\d+$/},
                 limit: {matches: /^\d+|all$/},
+                from: {isDate: true},
+                to: {isDate: true},
                 fields: {matches: /^[\w, ]+$/},
                 order: {matches: /^[a-z0-9_,\. ]+$/i},
                 name: {}
@@ -137,13 +141,14 @@ utils = {
     },
 
     /**
-     * ## Is Public Context?
-     * If this is a public context, return true
+     * ## Detect Public Context
+     * Calls parse context to expand the options.context object
      * @param {Object} options
      * @returns {Boolean}
      */
-    isPublicContext: function isPublicContext(options) {
-        return permissions.parseContext(options.context).public;
+    detectPublicContext: function detectPublicContext(options) {
+        options.context = permissions.parseContext(options.context);
+        return options.context.public;
     },
     /**
      * ## Apply Public Permissions
@@ -174,7 +179,7 @@ utils = {
         return function doHandlePublicPermissions(options) {
             var permsPromise;
 
-            if (utils.isPublicContext(options)) {
+            if (utils.detectPublicContext(options)) {
                 permsPromise = utils.applyPublicPermissions(docName, method, options);
             } else {
                 permsPromise = permissions.canThis(options.context)[method][singular](options.data);
@@ -182,8 +187,6 @@ utils = {
 
             return permsPromise.then(function permissionGranted() {
                 return options;
-            }).catch(function handleError(error) {
-                return errors.formatAndRejectAPIError(error);
             });
         };
     },
@@ -208,13 +211,15 @@ utils = {
 
             return permsPromise.then(function permissionGranted() {
                 return options;
-            }).catch(errors.NoPermissionError, function handleNoPermissionError(error) {
-                // pimp error message
-                error.message = 'You do not have permission to ' + method + ' ' + docName;
-                // forward error to next catch()
-                return Promise.reject(error);
-            }).catch(function handleError(error) {
-                return errors.formatAndRejectAPIError(error);
+            }).catch(function handleNoPermissionError(err) {
+                if (err instanceof errors.NoPermissionError) {
+                    err.message = i18n.t('errors.api.utils.noPermissionToCall', {method: method, docName: docName});
+                    return Promise.reject(err);
+                }
+
+                return Promise.reject(new errors.GhostError({
+                    err: err
+                }));
             });
         };
     },
@@ -270,7 +275,9 @@ utils = {
      */
     checkObject: function (object, docName, editId) {
         if (_.isEmpty(object) || _.isEmpty(object[docName]) || _.isEmpty(object[docName][0])) {
-            return errors.logAndRejectError(new errors.BadRequestError('No root key (\'' + docName + '\') provided.'));
+            return Promise.reject(new errors.BadRequestError({
+                message: i18n.t('errors.api.utils.noRootKeyProvided', {docName: docName})
+            }));
         }
 
         // convert author property to author_id to match the name in the database
@@ -281,20 +288,31 @@ utils = {
             }
         }
 
-        if (editId && object[docName][0].id && parseInt(editId, 10) !== parseInt(object[docName][0].id, 10)) {
-            return errors.logAndRejectError(new errors.BadRequestError('Invalid id provided.'));
+        // will remove unwanted null values
+        _.each(object[docName], function (value, index) {
+            if (!_.isObject(object[docName][index])) {
+                return;
+            }
+
+            object[docName][index] = _.omitBy(object[docName][index], _.isNull);
+        });
+
+        if (editId && object[docName][0].id && editId !== object[docName][0].id) {
+            return Promise.reject(new errors.BadRequestError({
+                message: i18n.t('errors.api.utils.invalidIdProvided')
+            }));
         }
 
         return Promise.resolve(object);
     },
-    checkFileExists: function (options, filename) {
-        return !!(options[filename] && options[filename].type && options[filename].path);
+    checkFileExists: function (fileData) {
+        return !!(fileData.mimetype && fileData.path);
     },
-    checkFileIsValid: function (file, types, extensions) {
-        var type = file.type,
-            ext = path.extname(file.name).toLowerCase();
+    checkFileIsValid: function (fileData, types, extensions) {
+        var type = fileData.mimetype,
+            ext = path.extname(fileData.name).toLowerCase();
 
-        if (_.contains(types, type) && _.contains(extensions, ext)) {
+        if (_.includes(types, type) && _.includes(extensions, ext)) {
             return true;
         }
         return false;
